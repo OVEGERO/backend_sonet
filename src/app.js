@@ -1,36 +1,18 @@
 const express = require('express');
+const cron = require('node-cron');
+
 require ('dotenv').config();
-const cors = require('cors');
-const http = require('http');
-const socket = require('./sockets/controller.js');
 const { dbConnection } = require('./database/config.js');
+const { performOnusCheck } = require('./controllers/status.js')
 
 const app = express();
 
 //BASE DE DATOS
 dbConnection();
 
-// CORS
-app.use(cors({
-    origin: 'http://localhost:4200', // Dirección de tu frontend
-    methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
-}));
+//Configuración del cron job
+cron.schedule('*/1 7-23 * * *', performOnusCheck, {
+    timezone: "America/Bogota"
+});
 
-
-//DIRECTORIO PUBLICO
-app.use( express.static('public') );
-
-//LECTURA Y PARSEO DEL BODY
-app.use( express.json() );
-
-//RUTAS DE LA API
-// rutas de los status
-app.use(('/api/status'), require('./routes/status'));
-
-// Crear servidor HTTP y WebSocket
-const server = http.createServer(app);
-socket.init(server);
-
-module.exports = server;
+module.exports = app;

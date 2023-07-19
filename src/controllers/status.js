@@ -1,13 +1,10 @@
-const { response } = require('express');
-const cron = require('node-cron');
 require('dotenv').config();
-const socket = require('../sockets/controller.js');
 const apiSmartolt = require('../api/apiConfigSmart.js');
 const apiTelegram = require('../api/apiConfigTelegram.js')
 const Onu = require('../models/Onu.js');
 
-let esperando = false;
-const contactsId = [process.env.CONTACT_ID_1, process.env.CONTACT_ID_2, process.env.CONTACT_ID_3];
+//const contactsId = [process.env.CONTACT_ID_1, process.env.CONTACT_ID_2, process.env.CONTACT_ID_3];
+const contactsId = [process.env.CONTACT_ID_1];
 
 const sendMessages = async (message) => {
     try {
@@ -16,10 +13,6 @@ const sendMessages = async (message) => {
             text: message,
         })));
     } catch (error) {
-        await Promise.all(contactsId.map(contactId => apiTelegram.post("/sendMessage", {
-            chat_id: contactId,
-            text: "Error al enviar el mensaje",
-        })));
         console.error(error);
     }
 };
@@ -96,9 +89,6 @@ const rellenarInfoFaltante = async () => {
 
 const dateFail = async (onu_external_id) => {
     try {
-        if (!onu_external_id) {
-            return;
-        }
         const { data } = await apiSmartolt.get(`/onu/get_onu_full_status_info/${onu_external_id}`)
         const history = data.full_status_json.History;
         const lastPosition = Object.keys(history)
@@ -113,12 +103,7 @@ const dateFail = async (onu_external_id) => {
 };
 
 const performOnusCheck = async () => {
-    if (esperando) {
-        return;
-    }
-    esperando = true;
     try {
-        const io = socket.getIO();
         await Onu.updateMany({}, { state: false });
         const { data } = await apiSmartolt.get("/onu/get_onus_statuses");
         const onus = data.response
@@ -130,6 +115,9 @@ const performOnusCheck = async () => {
                 unique_external_id: onu.unique_external_id,
                 status: onu.status,
             }));
+        if (onus.length === 0) {
+            return;
+        }
         await nuevosOnusEliminarAnteriores(onus);
         await rellenarInfoFaltante();
         const nuevosOnus = await Onu.find({ state: true });
@@ -142,37 +130,12 @@ const performOnusCheck = async () => {
             ];
             await sendMessages(messageParts.join(''));
         }
-        Onu.find().then(onus => {
-            io.emit('onus', onus);
-        }).catch(error => {
-            console.error(error);
-        });
     } catch (error) {
-        esperando = false;
         console.error(error);
-    } finally {
-        esperando = false;
     }
+
 };
 
-const getOnusStatuses = async (req, res = response) => {
-    try {
-        const onus = await Onu.find();
-        res.status(200).json({
-            message: "OK",
-            onus
-        });
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: "Error al obtener los estados de Onus" });
-    }
-}
-
-//Configuración del cron job
-cron.schedule('*/6 7-23 * * *', performOnusCheck, {
-    timezone: "America/Bogota"
-});
-
 module.exports = {
-    getOnusStatuses
+    performOnusCheck
 }
