@@ -11,7 +11,7 @@ const app = express();
 dbConnection();
 
 //Configuración del cron job
-cron.schedule('*/1 7-23 * * *', performOnusCheck, {
+cron.schedule('*/6 7-22 * * *', performOnusCheck, {
     timezone: "America/Bogota"
 });
 
