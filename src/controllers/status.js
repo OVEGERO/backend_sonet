@@ -3,8 +3,7 @@ const apiSmartolt = require('../api/apiConfigSmart.js');
 const apiTelegram = require('../api/apiConfigTelegram.js')
 const Onu = require('../models/Onu.js');
 
-//const contactsId = [process.env.CONTACT_ID_1, process.env.CONTACT_ID_2, process.env.CONTACT_ID_3];
-const contactsId = [process.env.CONTACT_ID_1];
+const contactsId = [process.env.CONTACT_ID_1, process.env.CONTACT_ID_2, process.env.CONTACT_ID_3];
 
 const sendMessages = async (message) => {
     try {
@@ -23,16 +22,21 @@ const nuevosOnusEliminarAnteriores = async (onusData) => {
         const onusLocalesMap = new Map(onusLocales.map(onuLocal => [onuLocal.unique_external_id, onuLocal]));
         const nuevosOnus = [];
         const onusEliminados = [];
+        const onusParaActualizar = [];
+        
         onusData.forEach(onuData => {
             if (!onusLocalesMap.has(onuData.unique_external_id) && nuevosOnus.length < 5) {
                 nuevosOnus.push(onuData);
             }
             onusLocalesMap.delete(onuData.unique_external_id);
         });
+        
         onusEliminados.push(...onusLocalesMap.values());
+        
         if (onusEliminados.length > 0) {
             await Onu.deleteMany({ _id: { $in: onusEliminados.map(onu => onu._id) } });
         }
+        
         if (nuevosOnus.length > 0) {
             await Promise.all(nuevosOnus.map(onu => dateFail(onu.unique_external_id))).then(dates => {
                 const onusInsertar = nuevosOnus.reduce((onusAccum, onu, index) => {
@@ -47,9 +51,13 @@ const nuevosOnusEliminarAnteriores = async (onusData) => {
                 }, []);
 
                 if (onusInsertar.length > 0) {  // solo hacemos la inserción si hay ONU para insertar
-                    return Onu.insertMany(onusInsertar);
+                    onusParaActualizar.push(...onusInsertar);
                 }
             });
+        }
+
+        if (onusParaActualizar.length > 0) {
+            await Onu.insertMany(onusParaActualizar);
         }
 
     } catch (error) {
@@ -62,26 +70,38 @@ const rellenarInfoFaltante = async () => {
         const onusSinNombre = await Onu.find({
             name: { $exists: false }
         });
+        
         if (onusSinNombre.length === 0) {
             return;
         }
+        
+        const updates = [];
+        
         const promises = onusSinNombre.map(async (onuSinNombre) => {
             if (!onuSinNombre.unique_external_id) {
                 return;
             }
             const { data } = await apiSmartolt.get(`/onu/get_onu_details/${onuSinNombre.unique_external_id}`);
-            await Onu.updateOne(
-                { _id: onuSinNombre._id },
-                {
-                    $set: {
-                        name: data.onu_details.name,
-                        odb_name: data.onu_details.odb_name,
-                        zone_name: data.onu_details.zone_name
+            updates.push({
+                updateOne: {
+                    filter: { _id: onuSinNombre._id },
+                    update: {
+                        $set: {
+                            name: data.onu_details.name,
+                            odb_name: data.onu_details.odb_name,
+                            zone_name: data.onu_details.zone_name
+                        }
                     }
                 }
-            );
+            });
         });
+        
         await Promise.all(promises);
+        
+        if (updates.length > 0) {
+            await Onu.bulkWrite(updates);
+        }
+        
     } catch (error) {
         console.error(error);
     }
